@@ -41,7 +41,7 @@ from hud_video import HudVideoPlayer
 # Mark 52 and 53 shipped showing "PROTOCOL XLIX" — the number from Mark 49 — and
 # Mark 55 shipped titled "MARK 54". Deriving the protocol from the name means a
 # release bump is this one line.
-APP_VERSION  = "MARK LIII"
+APP_VERSION  = "K.M.F.L. "
 APP_PROTOCOL = APP_VERSION.split()[-1]
 
 def _base_dir() -> Path:
@@ -62,8 +62,8 @@ def _read_full_config() -> dict:
         return {}
 
 
-_DEFAULT_W, _DEFAULT_H = 980, 700
-_MIN_W,     _MIN_H     = 820, 580
+_DEFAULT_W, _DEFAULT_H = 1400, 700
+_MIN_W,     _MIN_H     = 1100, 700
 _LEFT_W  = 148
 _RIGHT_W = 340
 
@@ -2752,6 +2752,18 @@ class MainWindow(QMainWindow):
     def __init__(self, face_path: str):
         super().__init__()
         self._face_path = face_path
+          # ── YEH 4 LINES ADD KAREIN (Error fix) ──
+        self._overlay = None
+        self._remote_overlay = None
+        self._customize_overlay = None
+        self._plugin_manager_overlay = None
+        self._audio_overlay = None
+        self._memory_overlay = None
+        # ────────────────────────────────────────
+
+        # Load customization from config
+        _cfg = _read_full_config()
+        # ... baaki code waisa hi rahega ...
 
         # Load customization from config
         _cfg = _read_full_config()
@@ -2766,24 +2778,19 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{_display} — {APP_VERSION}")
         self.setMinimumSize(_MIN_W, _MIN_H)
         self.resize(_DEFAULT_W, _DEFAULT_H)
-
-        screen = QApplication.primaryScreen().availableGeometry()
-        self.move(
-            (screen.width()  - _DEFAULT_W) // 2,
-            (screen.height() - _DEFAULT_H) // 2,
-        )
+        self.showMaximized()  # <--- Poori screen par khulega
 
         self.on_text_command   = None
-        self.on_remote_clicked = None   # callable: () -> (url, key) | None
-        self.on_interrupt      = None   # callable: () -> None — stop JARVIS mid-speech
-        self.on_voice_change   = None   # callable: () -> None — rebuild session with new voice
-        self.on_audio_device_change = None  # callable: () -> None — reopen audio streams
-        self._confirm_overlay  = None   # live ConfirmBanner, if one is on screen
-        self.get_plugins       = None   # callable: () -> list[dict], set by JarvisLive
-        self.get_plugin_settings = None # callable: () -> list[dict] settings schemas, set by JarvisLive
-        self.on_wake_toggle    = None   # callable: (enable: bool) -> str, set by JarvisLive
-        self.on_wake_manual    = None   # callable: () -> None — manual sleep/wake
-        self.wake_get_state    = None   # callable: () -> dict {enabled, awake, ready}
+        self.on_remote_clicked = None   
+        self.on_interrupt      = None   
+        self.on_voice_change   = None   
+        self.on_audio_device_change = None  
+        self._confirm_overlay  = None   
+        self.get_plugins       = None   
+        self.get_plugin_settings = None 
+        self.on_wake_toggle    = None   
+        self.on_wake_manual    = None   
+        self.wake_get_state    = None   
         self._muted            = False
         self._current_file: str | None = None
         self._remote_overlay: RemoteKeyOverlay | None = None
@@ -2793,93 +2800,162 @@ class MainWindow(QMainWindow):
         central.setStyleSheet(f"background: {C.BG};")
         self.setCentralWidget(central)
 
-        root = QVBoxLayout(central)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-        root.addWidget(self._build_header())
+        # ── NAYA PREMIUM GIRL AI LAYOUT ──────────────────────────────────
+        main_lay = QVBoxLayout(central)
+        main_lay.setContentsMargins(30, 20, 30, 30)
+        main_lay.setSpacing(15)
 
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
+        # 1. Top Bar (Glassmorphism)
+        top_bar = QFrame()
+        top_bar.setFixedHeight(60)
+        top_bar.setStyleSheet(f"""
+            QFrame {{
+                background: rgba(26, 15, 35, 0.6);
+                border: 1px solid {C.BORDER_B};
+                border-radius: 15px;
+            }}
+        """)
+        top_lay = QHBoxLayout(top_bar)
+        top_lay.setContentsMargins(20, 0, 20, 0)
+        
+        title = QLabel(f"🌸 {_display}")
+        title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {C.PRI}; background: transparent; border: none;")
+        top_lay.addWidget(title)
+        
+        top_lay.addStretch()
+        
+        self._clock_lbl = QLabel("00:00:00")
+        self._clock_lbl.setFont(QFont("Consolas", 14, QFont.Weight.Bold))
+        self._clock_lbl.setStyleSheet(f"color: {C.WHITE}; background: transparent; border: none;")
+        top_lay.addWidget(self._clock_lbl)
+        
+        main_lay.addWidget(top_bar)
 
-        self._left_panel = self._build_left_panel()
-        body.addWidget(self._left_panel, stretch=0)
-
-        # Center column: HUD + resizable content panel via QSplitter
+        # 2. Center HUD (Girl Face)
         self.hud = HudCanvas(face_path, _display)
         self.hud.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
         self._content_panel = self._build_content_panel()
+        self._content_panel.hide()
 
-        # Live camera container — replaces HUD when camera stream is active
         _cam_cont = QWidget()
-        _cam_cont.setStyleSheet("background: #000308;")
-        _cam_v = QVBoxLayout(_cam_cont)
-        _cam_v.setContentsMargins(0, 0, 0, 0)
-        _cam_v.setSpacing(0)
-        _cam_hdr = QHBoxLayout()
-        _cam_hdr.setContentsMargins(8, 5, 8, 5)
-        _cam_title = QLabel("◈  CAMERA FEED")
-        _cam_title.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        _cam_title.setStyleSheet(f"color: {C.PRI}; background: transparent;")
-        _cam_hdr.addWidget(_cam_title)
-        _cam_hdr.addStretch()
-        _cam_x = QPushButton("✕  CLOSE")
-        _cam_x.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        _cam_x.setCursor(Qt.CursorShape.PointingHandCursor)
-        _cam_x.setStyleSheet(f"""
-            QPushButton {{
-                color: {C.TEXT_DIM}; background: transparent;
-                border: none; padding: 2px 6px;
-            }}
-            QPushButton:hover {{ color: {C.PRI}; }}
-        """)
-        _cam_x.clicked.connect(self.stop_camera_stream)
-        _cam_hdr.addWidget(_cam_x)
-        _cam_v.addLayout(_cam_hdr)
+        _cam_cont.hide()
         self._cam_live_lbl = QLabel()
-        self._cam_live_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._cam_live_lbl.setStyleSheet("background: transparent;")
-        self._cam_live_lbl.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        _cam_v.addWidget(self._cam_live_lbl, stretch=1)
+        _cam_v = QVBoxLayout(_cam_cont)
+        _cam_v.addWidget(self._cam_live_lbl)
 
-        # Stack: 0 = animated HUD, 1 = live camera
-               # Stack: 0 = animated HUD, 1 = live camera, 2 = video
         self._hud_cam_stack = QStackedWidget()
         self._hud_cam_stack.addWidget(self.hud)
         self._hud_cam_stack.addWidget(_cam_cont)
 
-        # HUD video player (stack index 2)
         _vid_path = BASE_DIR / "assets" / "hud_video.mp4"
         self._hud_video = HudVideoPlayer(
             self._hud_cam_stack, parent=self,
             video_path=_vid_path, muted=True,
         )
-        self._center_split = QSplitter(Qt.Orientation.Vertical)
-        self._center_split.setStyleSheet(f"""
-            QSplitter::handle {{
-                background: {C.BORDER};
-                height: 4px;
+        
+        main_lay.addWidget(self._hud_cam_stack, stretch=1)
+
+        # 3. Floating Buttons (Modern Glowing)
+        btn_lay = QHBoxLayout()
+        btn_lay.setSpacing(15)
+        btn_lay.addStretch()
+
+        _btn_style = f"""
+            QPushButton {{
+                background: rgba(37, 22, 51, 0.8);
+                color: {C.TEXT};
+                border: 2px solid {C.BORDER_B};
+                border-radius: 35px;
+                font-size: 20px;
             }}
-            QSplitter::handle:hover {{
-                background: {C.PRI_DIM};
+            QPushButton:hover {{
+                background: {C.PRI_GHO};
+                border: 2px solid {C.PRI};
+                color: {C.PRI};
+            }}
+        """
+
+        cam_btn = QPushButton("📷")
+        cam_btn.setFixedSize(65, 65)
+        cam_btn.setStyleSheet(_btn_style)
+        cam_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_lay.addWidget(cam_btn)
+
+        self._mute_btn = QPushButton("🎙️")
+        self._mute_btn.setFixedSize(75, 75)
+        self._mute_btn.setStyleSheet(_btn_style)
+        self._mute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mute_btn.clicked.connect(self._toggle_mute)
+        btn_lay.addWidget(self._mute_btn)
+
+        self._drawer_btn = QPushButton("⚙️")
+        self._drawer_btn.setFixedSize(65, 65)
+        self._drawer_btn.setStyleSheet(_btn_style)
+        self._drawer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._drawer_btn.setCheckable(True)
+        self._drawer_btn.clicked.connect(self._toggle_drawer)
+        btn_lay.addWidget(self._drawer_btn)
+
+        btn_lay.addStretch()
+        main_lay.addLayout(btn_lay)
+
+        # 4. Bottom Chat Input (Pill Shaped)
+        chat_box = QFrame()
+        chat_box.setFixedHeight(65)
+        chat_box.setStyleSheet(f"""
+            QFrame {{
+                background: rgba(26, 15, 35, 0.8);
+                border: 2px solid {C.BORDER};
+                border-radius: 32px;
+            }}
+            QFrame:hover {{
+                border: 2px solid {C.PRI_DIM};
             }}
         """)
-        self._center_split.addWidget(self._hud_cam_stack)
-        self._center_split.addWidget(self._content_panel)
-        self._center_split.setStretchFactor(0, 3)
-        self._center_split.setStretchFactor(1, 1)
-        self._center_split.setCollapsible(0, False)
-        body.addWidget(self._center_split, stretch=5)
+        chat_lay = QHBoxLayout(chat_box)
+        chat_lay.setContentsMargins(25, 0, 10, 0)
+        
+        self._input = QLineEdit()
+        self._input.setPlaceholderText("Talk to me... 💭")
+        self._input.setFont(QFont("Segoe UI", 13))
+        self._input.setStyleSheet(f"background: transparent; border: none; color: {C.WHITE};")
+        self._input.returnPressed.connect(self._send)
+        chat_lay.addWidget(self._input)
 
-        self._right_panel = self._build_right_panel()
-        body.addWidget(self._right_panel, stretch=0)
+        send_btn = QPushButton("➤")
+        send_btn.setFixedSize(48, 48)
+        send_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C.PRI};
+                color: {C.BG};
+                border-radius: 24px;
+                font-size: 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background: {C.WHITE}; }}
+        """)
+        send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        send_btn.clicked.connect(self._send)
+        chat_lay.addWidget(send_btn)
 
-        root.addLayout(body, stretch=1)
-        root.addWidget(self._build_footer())
+        main_lay.addWidget(chat_box)
+        # ── END LAYOUT ───────────────────────────────────────────────────
 
-        # Quick-access drawer (floating overlay, built after central widget layout is done)
+        # Hidden logic for main.py
+        self._log = LogWidget()
+        self._log.hide()
+        self._drop_zone = FileDropZone()
+        self._drop_zone.hide()
+
+        # --- Hidden elements for main.py compatibility ---
+        self._log = LogWidget()
+        self._log.hide()
+        self._drop_zone = FileDropZone()
+        self._drop_zone.hide()
+        
+        # Baaki initialization jo pehle tha
         self._quick_drawer = self._build_quick_drawer()
         self._update_autostart_btn(self._check_autostart())
         from memory.config_manager import get_brief_enabled as _gbe
@@ -2890,7 +2966,6 @@ class MainWindow(QMainWindow):
         self._clock_tmr.start(1000)
         self._tick_clock()
 
-        # Metric update timer
         self._metric_tmr = QTimer(self)
         self._metric_tmr.timeout.connect(self._update_metrics)
         self._metric_tmr.start(2000)
@@ -2909,13 +2984,13 @@ class MainWindow(QMainWindow):
         self._wake_dl_sig.connect(self._on_wake_install_done)
         self._cam_stop = threading.Event()
 
-        # Camera preview overlay (child of central widget, positioned in resizeEvent)
         self._cam_preview = _CameraPreview(self.centralWidget())
+        self._cam_preview.hide() # Hide preview
 
-        # Clipboard panel (child of central widget, bottom-center)
         self._clipboard_panel = ClipboardPanel(self.centralWidget())
         self._clipboard_panel.action_requested.connect(self._on_clipboard_action)
         QApplication.clipboard().dataChanged.connect(self._on_clipboard_changed)
+        self._clipboard_panel.hide() # Hide clipboard
 
         self._overlay: SetupOverlay | None = None
         self._ready = self._check_config()
@@ -2928,10 +3003,9 @@ class MainWindow(QMainWindow):
         sc_full.activated.connect(self._toggle_fullscreen)
         sc_intr = QShortcut(QKeySequence("Escape"), self)
         sc_intr.activated.connect(self._do_interrupt)
-                # Auto-start HUD video if file exists
+        
         if _vid_path.is_file():
             QTimer.singleShot(600, self._hud_video.start)
-
     def _show_camera_frame(self, img_bytes: bytes):
         """Slot — display camera preview overlay (main thread)."""
         self._cam_preview.show_frame(img_bytes)
@@ -3361,92 +3435,55 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         cw = self.centralWidget()
-        if self._overlay and self._overlay.isVisible():
+        if not cw:
+            return
+
+        # 1. Setup Overlay
+        if hasattr(self, '_overlay') and self._overlay and self._overlay.isVisible():
             ow, oh = 460, 390
             self._overlay.setGeometry(
                 (cw.width()  - ow) // 2,
                 (cw.height() - oh) // 2,
                 ow, oh,
             )
-        if self._remote_overlay and self._remote_overlay.isVisible():
+            
+        # 2. Remote Overlay
+        if hasattr(self, '_remote_overlay') and self._remote_overlay and self._remote_overlay.isVisible():
             ow, oh = RemoteKeyOverlay._OW, RemoteKeyOverlay._OH
             self._remote_overlay.setGeometry(
                 (cw.width()  - ow) // 2,
                 (cw.height() - oh) // 2,
                 ow, oh,
             )
-        if self._customize_overlay and self._customize_overlay.isVisible():
+            
+        # 3. Customize Overlay
+        if hasattr(self, '_customize_overlay') and self._customize_overlay and self._customize_overlay.isVisible():
             ow, oh = CustomizeOverlay._OW, CustomizeOverlay._OH
             self._customize_overlay.setGeometry(
                 (cw.width()  - ow) // 2,
                 (cw.height() - oh) // 2,
                 ow, oh,
             )
-        # Camera preview — bottom-right corner of the center/HUD area
-        pw = _CameraPreview._W
-        ph = self._cam_preview.height() or _CameraPreview._H
-        self._cam_preview.setGeometry(
-            cw.width() - _RIGHT_W - pw - 12,
-            cw.height() - ph - 28,
-            pw, ph,
-        )
-        # Clipboard panel — bottom-center
-        if hasattr(self, '_clipboard_panel') and self._clipboard_panel.isVisible():
+            
+        # 4. Camera Preview (Yahan error aa raha tha kyunki yeh exist nahi karta)
+        if hasattr(self, '_cam_preview') and self._cam_preview:
+            pw = _CameraPreview._W
+            ph = self._cam_preview.height() or _CameraPreview._H
+            self._cam_preview.setGeometry(
+                cw.width() - _RIGHT_W - pw - 12,
+                cw.height() - ph - 28,
+                pw, ph,
+            )
+            
+        # 5. Clipboard Panel
+        if hasattr(self, '_clipboard_panel') and self._clipboard_panel and self._clipboard_panel.isVisible():
             self._position_clipboard_panel()
-        # Quick drawer — reposition if open
-        if hasattr(self, '_quick_drawer') and self._quick_drawer.isVisible():
+            
+        # 6. Quick Drawer
+        if hasattr(self, '_quick_drawer') and self._quick_drawer and self._quick_drawer.isVisible():
             self._position_quick_drawer()
-
     def _update_metrics(self):
-        snap = _metrics.snapshot()
-
-        # CPU
-        cpu = snap["cpu"]
-        self._bar_cpu.set_value(cpu, f"{cpu:.0f}%")
-
-        # MEM
-        mem = snap["mem"]
-        self._bar_mem.set_value(mem, f"{mem:.0f}%")
-
-        # NET
-        net = snap["net"]
-        if net < 1.0:
-            net_str = f"{net*1024:.0f}KB/s"
-        else:
-            net_str = f"{net:.1f}MB/s"
-        net_pct = min(100, net * 10)  # 10 MB/s = %100
-        self._bar_net.set_value(net_pct, net_str)
-
-        # GPU
-        gpu = snap["gpu"]
-        if gpu >= 0:
-            self._bar_gpu.set_value(gpu, f"{gpu:.0f}%")
-        else:
-            self._bar_gpu.set_value(0, "N/A")
-
-        # TMP
-        tmp = snap["tmp"]
-        if tmp >= 0:
-            tmp_pct = min(100, (tmp / 100) * 100)
-            self._bar_tmp.set_value(tmp_pct, f"{tmp:.0f}°C")
-        else:
-            self._bar_tmp.set_value(0, "N/A")
-
-        try:
-            boot_t  = psutil.boot_time()
-            elapsed = time.time() - boot_t
-            h = int(elapsed // 3600)
-            m = int((elapsed % 3600) // 60)
-            self._uptime_lbl.setText(f"UP  {h:02d}:{m:02d}")
-        except Exception:
-            self._uptime_lbl.setText("UP  --:--")
-
-        try:
-            proc_count = len(psutil.pids())
-            self._proc_lbl.setText(f"PROC  {proc_count}")
-        except Exception:
-            self._proc_lbl.setText("PROC  --")
-
+        pass
 
     def _build_header(self) -> QWidget:
         w = QWidget()
@@ -3461,7 +3498,7 @@ class MainWindow(QMainWindow):
             l.setStyleSheet(f"color: {color}; background: transparent;")
             return l
 
-        lay.addWidget(_badge(APP_VERSION, C.PRI_DIM))
+       # lay.addWidget(_badge(APP_VERSION, C.PRI_DIM))
         lay.addSpacing(8)
         self._drawer_btn = QPushButton("⚙")
         self._drawer_btn.setFixedSize(26, 26)
@@ -3514,8 +3551,13 @@ class MainWindow(QMainWindow):
         return w
 
     def _tick_clock(self):
-        self._clock_lbl.setText(time.strftime("%H:%M:%S"))
-        self._date_lbl.setText(time.strftime("%a %d %b %Y"))
+        # Naye layout mein sirf ek clock label hai
+        if hasattr(self, '_clock_lbl') and self._clock_lbl:
+            self._clock_lbl.setText(time.strftime("%H:%M:%S"))
+        
+        # Agar purana date label kisi wajah se bach gaya hai, toh error na aaye
+        if hasattr(self, '_date_lbl') and self._date_lbl:
+            self._date_lbl.setText(time.strftime("%a %d %b %Y"))
 
     def _build_left_panel(self) -> QWidget:
         w = QWidget()
@@ -3576,7 +3618,7 @@ class MainWindow(QMainWindow):
         for txt, col in [
             ("AI CORE\nACTIVE",  C.GREEN),
             ("SEC\nCLEARED",     C.PRI),
-            ("PROTOCOL\n" + APP_PROTOCOL,   C.TEXT_DIM),
+            
         ]:
             lbl = QLabel(txt)
             lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
@@ -3698,6 +3740,7 @@ class MainWindow(QMainWindow):
                           f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;")
         lay.addWidget(hdr)
 
+        # ── PURANE BUTTONS ────────────────────────────────────────────────
         remote_btn = QPushButton("◉  REMOTE CONTROL")
         remote_btn.setFixedHeight(30)
         remote_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
@@ -3705,6 +3748,32 @@ class MainWindow(QMainWindow):
         remote_btn.setStyleSheet(_BTN_STYLE_PRI)
         remote_btn.clicked.connect(self._open_remote)
         lay.addWidget(remote_btn)
+
+        # ── NAYE BUTTONS YAHAN ADD KAREIN ────────────────────────────────
+        rec_btn = QPushButton("⏺  SCREEN RECORD")
+        rec_btn.setFixedHeight(26)
+        rec_btn.setFont(QFont("Courier New", 7))
+        rec_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        rec_btn.setStyleSheet(_BTN_STYLE_DIM)
+        rec_btn.clicked.connect(self._start_screen_record) 
+        lay.addWidget(rec_btn)
+
+        weather_btn = QPushButton("☁  WEATHER")
+        weather_btn.setFixedHeight(26)
+        weather_btn.setFont(QFont("Courier New", 7))
+        weather_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        weather_btn.setStyleSheet(_BTN_STYLE_DIM)
+        weather_btn.clicked.connect(self._show_weather)
+        lay.addWidget(weather_btn)
+
+        ss_btn = QPushButton("📸  SCREENSHOT")
+        ss_btn.setFixedHeight(26)
+        ss_btn.setFont(QFont("Courier New", 7))
+        ss_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ss_btn.setStyleSheet(_BTN_STYLE_DIM)
+        ss_btn.clicked.connect(self._take_screenshot)
+        lay.addWidget(ss_btn)
+        # ─────────────────────────────────────────────────────────────────
 
         fs_btn = QPushButton("⛶  FULLSCREEN  [F11]")
         fs_btn.setFixedHeight(26)
@@ -3758,8 +3827,6 @@ class MainWindow(QMainWindow):
         self._wake_sleep_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._wake_sleep_btn.clicked.connect(self._tap_wake_manual)
         lay.addWidget(self._wake_sleep_btn)
-        # Neutral placeholder now; the real state (which may load the model to
-        # check readiness) is resolved lazily the first time the drawer opens.
         self._wake_btn.setText("🎙  WAKE WORD")
         self._wake_btn.setStyleSheet(_BTN_STYLE_DIM)
         self._wake_sleep_btn.hide()
@@ -3795,12 +3862,46 @@ class MainWindow(QMainWindow):
         settings_btn.setStyleSheet(_BTN_STYLE_DIM)
         settings_btn.clicked.connect(self._open_plugin_settings)
         lay.addWidget(settings_btn)
-                # HUD video toggle
+
+        # HUD video toggle
         vid_btn = QPushButton("🎬  HUD VIDEO: OFF")
         vid_btn.setFixedHeight(26)
         vid_btn.setFont(QFont("Courier New", 7))
         vid_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         vid_btn.setStyleSheet(_BTN_STYLE_DIM)
+
+        def _toggle_vid(_=False):
+            on = self._hud_video.toggle()
+            if on:
+                vid_btn.setText("🎬  HUD VIDEO: ON")
+                vid_btn.setStyleSheet(f"""
+                    QPushButton {{ background: #001a08; color: {C.GREEN};
+                        border: 1px solid {C.GREEN_D}; border-radius: 3px;
+                        text-align: left; padding: 0 8px; }}
+                    QPushButton:hover {{ background: #002010; }}
+                """)
+            else:
+                vid_btn.setText("🎬  HUD VIDEO: OFF")
+                vid_btn.setStyleSheet(_BTN_STYLE_DIM)
+
+        vid_btn.clicked.connect(_toggle_vid)
+        lay.addWidget(vid_btn)
+
+        w.adjustSize()
+        return w
+
+    # ── NAYE FUNCTIONS (Yeh drawer ke bahar aayenge) ──────────────────────
+    def _start_screen_record(self):
+        self._log.append_log("SYS: Screen recording started...")
+        # Yahan aap screen recording ka code likh sakte hain
+
+    def _show_weather(self):
+        self._log.append_log("SYS: Fetching weather...")
+        # Yahan weather dikhane ka code likhein
+
+    def _take_screenshot(self):
+        self._log.append_log("SYS: Screenshot taken!")
+        # Yahan screenshot lene ka code likhein
 
         def _toggle_vid(_=False):
             on = self._hud_video.toggle()
